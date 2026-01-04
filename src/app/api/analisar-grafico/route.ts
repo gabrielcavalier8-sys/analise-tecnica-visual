@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
-
 const PROMPT_SISTEMA = `Você é uma Inteligência Artificial especializada em ANÁLISE TÉCNICA VISUAL de mercados financeiros, com expertise em Fibonacci e Ondas de Elliott.
 
 Sua função é analisar IMAGENS de gráficos de trading capturadas pela câmera de um celular.
@@ -104,12 +100,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!process.env.OPENAI_API_KEY) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    
+    if (!apiKey) {
       return NextResponse.json(
         { error: "API Key da OpenAI não configurada" },
         { status: 500 }
       );
     }
+
+    const openai = new OpenAI({
+      apiKey: apiKey,
+    });
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
@@ -136,7 +138,7 @@ export async function POST(request: NextRequest) {
       ],
       max_tokens: 800,
       temperature: 0.3,
-    });;
+    });
 
     const conteudo = response.choices[0]?.message?.content;
 

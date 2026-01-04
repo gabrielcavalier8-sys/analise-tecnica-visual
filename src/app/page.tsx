@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Camera, ArrowUp, ArrowDown, Loader2, AlertCircle, TrendingUp, Activity, Download, X, Share } from "lucide-react";
+import { Camera, ArrowUp, ArrowDown, Loader2, AlertCircle, TrendingUp, Activity, Download, X, Share, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 
@@ -37,8 +37,10 @@ export default function Home() {
   const [mostrarBotaoIOS, setMostrarBotaoIOS] = useState(false);
   const [mostrarModalIOS, setMostrarModalIOS] = useState(false);
   const [mostrarModalPermissao, setMostrarModalPermissao] = useState(false);
+  const [permissaoCameraNegada, setPermissaoCameraNegada] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Registrar Service Worker para PWA
   useEffect(() => {
@@ -68,11 +70,38 @@ export default function Home() {
     setMostrarModalIOS(true);
   };
 
+  const verificarPermissaoCamera = async () => {
+    try {
+      // Verificar se a API de permissões está disponível
+      if ('permissions' in navigator) {
+        const result = await navigator.permissions.query({ name: 'camera' as PermissionName });
+        
+        if (result.state === 'denied') {
+          setPermissaoCameraNegada(true);
+          setErro("Permissão de câmera negada. Clique no botão abaixo para ver como habilitar.");
+          return false;
+        }
+      }
+      return true;
+    } catch (error) {
+      // Se a API de permissões não estiver disponível, tenta solicitar diretamente
+      console.log("API de permissões não disponível, tentando acesso direto");
+      return true;
+    }
+  };
+
   const solicitarPermissaoCamera = async () => {
     try {
       setErro(null);
       setMostrarModalPermissao(false);
+      setPermissaoCameraNegada(false);
       
+      // Verificar permissão primeiro
+      const temPermissao = await verificarPermissaoCamera();
+      if (!temPermissao) {
+        return;
+      }
+
       // Solicitar permissão explícita da câmera
       const constraints = {
         video: {
@@ -97,16 +126,18 @@ export default function Home() {
         };
         
         setCameraAtiva(true);
+        setPermissaoCameraNegada(false);
       }
     } catch (error: any) {
       console.error("Erro ao acessar câmera:", error);
       
       if (error.name === "NotAllowedError" || error.name === "PermissionDeniedError") {
-        setErro("Permissão de câmera negada. Para permitir acesso:\n\n📱 iPhone/iPad:\n1. Abra Ajustes\n2. Role até encontrar Safari\n3. Toque em Câmera\n4. Selecione 'Permitir'\n5. Volte e recarregue a página");
+        setPermissaoCameraNegada(true);
+        setErro("Permissão de câmera negada. Use o botão 'Fazer Upload' ou veja como habilitar a câmera abaixo.");
       } else if (error.name === "NotFoundError" || error.name === "DevicesNotFoundError") {
-        setErro("Nenhuma câmera encontrada no dispositivo.");
+        setErro("Nenhuma câmera encontrada. Use o botão 'Fazer Upload' para enviar uma imagem.");
       } else if (error.name === "NotReadableError" || error.name === "TrackStartError") {
-        setErro("Câmera está sendo usada por outro aplicativo. Feche outros apps e tente novamente.");
+        setErro("Câmera está sendo usada por outro aplicativo. Feche outros apps ou use o botão 'Fazer Upload'.");
       } else if (error.name === "OverconstrainedError") {
         // Tentar com configuração mais simples
         try {
@@ -121,17 +152,20 @@ export default function Home() {
             videoRef.current.play();
             setCameraAtiva(true);
             setErro(null);
+            setPermissaoCameraNegada(false);
           }
         } catch (fallbackError) {
-          setErro("Não foi possível acessar a câmera. Verifique as permissões nas configurações do dispositivo.");
+          setPermissaoCameraNegada(true);
+          setErro("Não foi possível acessar a câmera. Use o botão 'Fazer Upload' para enviar uma imagem.");
         }
       } else {
-        setErro("Erro ao acessar a câmera. Verifique as permissões e tente novamente.");
+        setPermissaoCameraNegada(true);
+        setErro("Erro ao acessar a câmera. Use o botão 'Fazer Upload' ou verifique as permissões.");
       }
     }
   };
 
-  const iniciarCamera = () => {
+  const iniciarCamera = async () => {
     // Detectar se é iOS
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     
@@ -140,7 +174,7 @@ export default function Home() {
       setMostrarModalPermissao(true);
     } else {
       // Para outros dispositivos, solicitar diretamente
-      solicitarPermissaoCamera();
+      await solicitarPermissaoCamera();
     }
   };
 
@@ -170,6 +204,33 @@ export default function Home() {
       pararCamera();
       analisarGrafico(imagemBase64);
     }
+  };
+
+  const handleUploadImagem = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Verificar se é uma imagem
+    if (!file.type.startsWith('image/')) {
+      setErro("Por favor, selecione um arquivo de imagem válido.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imagemBase64 = e.target?.result as string;
+      setImagemCapturada(imagemBase64);
+      setErro(null);
+      analisarGrafico(imagemBase64);
+    };
+    reader.onerror = () => {
+      setErro("Erro ao ler o arquivo. Tente novamente.");
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const abrirSeletorArquivo = () => {
+    fileInputRef.current?.click();
   };
 
   const analisarGrafico = async (imagemBase64: string) => {
@@ -204,7 +265,45 @@ export default function Home() {
     setResultado(null);
     setImagemCapturada(null);
     setErro(null);
-    iniciarCamera();
+    setPermissaoCameraNegada(false);
+  };
+
+  const mostrarInstrucoesPermissao = () => {
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isChrome = /Chrome/.test(navigator.userAgent);
+    const isSafari = /Safari/.test(navigator.userAgent) && !isChrome;
+    
+    let instrucoes = "";
+    
+    if (isIOS) {
+      instrucoes = `📱 iPhone/iPad (Safari):
+1. Abra Ajustes do iOS
+2. Role até encontrar "Safari"
+3. Toque em "Câmera"
+4. Selecione "Permitir"
+5. Volte ao app e recarregue a página`;
+    } else if (isChrome) {
+      instrucoes = `🌐 Google Chrome:
+1. Clique no ícone de cadeado/informações na barra de endereço
+2. Procure por "Câmera"
+3. Altere para "Permitir"
+4. Recarregue a página`;
+    } else if (isSafari) {
+      instrucoes = `🧭 Safari (Mac):
+1. Vá em Safari → Configurações
+2. Clique em "Sites"
+3. Selecione "Câmera"
+4. Encontre este site e altere para "Permitir"
+5. Recarregue a página`;
+    } else {
+      instrucoes = `🌐 Navegador:
+1. Clique no ícone de configurações/permissões na barra de endereço
+2. Procure por "Câmera" ou "Permissões"
+3. Altere para "Permitir"
+4. Recarregue a página`;
+    }
+    
+    setErro(instrucoes);
   };
 
   return (
@@ -219,6 +318,15 @@ export default function Home() {
             Análise com Fibonacci e Ondas de Elliott
           </p>
         </div>
+
+        {/* Input oculto para upload de arquivo */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleUploadImagem}
+          className="hidden"
+        />
 
         {/* Botão Download iOS */}
         {mostrarBotaoIOS && (
@@ -370,11 +478,15 @@ export default function Home() {
                   Permitir Câmera
                 </Button>
                 <Button
-                  onClick={() => setMostrarModalPermissao(false)}
+                  onClick={() => {
+                    setMostrarModalPermissao(false);
+                    abrirSeletorArquivo();
+                  }}
                   variant="outline"
                   className="w-full border-slate-600 text-slate-300 hover:bg-slate-700"
                 >
-                  Cancelar
+                  <Upload className="w-5 h-5 mr-2" />
+                  Fazer Upload
                 </Button>
               </div>
             </Card>
@@ -388,7 +500,7 @@ export default function Home() {
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6">
                 <Camera className="w-16 h-16 sm:w-20 sm:h-20 text-slate-500" />
                 <p className="text-slate-400 text-center text-sm sm:text-base">
-                  Clique no botão abaixo para iniciar a câmera
+                  Use a câmera ou faça upload de uma imagem do gráfico
                 </p>
               </div>
             )}
@@ -571,21 +683,40 @@ export default function Home() {
 
         {/* Erro */}
         {erro && (
-          <Card className="bg-red-500/10 border-red-500/30 backdrop-blur-sm p-4 mb-6">
-            <p className="text-red-300 text-sm sm:text-base text-center whitespace-pre-line">{erro}</p>
+          <Card className="bg-red-500/10 border-red-500/30 backdrop-blur-sm p-4 mb-4">
+            <p className="text-red-300 text-sm sm:text-base whitespace-pre-line mb-3">{erro}</p>
+            {permissaoCameraNegada && (
+              <Button
+                onClick={mostrarInstrucoesPermissao}
+                variant="outline"
+                className="w-full border-red-500/50 text-red-300 hover:bg-red-500/10"
+              >
+                Ver instruções detalhadas
+              </Button>
+            )}
           </Card>
         )}
 
         {/* Botões de Ação */}
         <div className="flex flex-col sm:flex-row gap-3">
           {!cameraAtiva && !resultado && (
-            <Button
-              onClick={iniciarCamera}
-              className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-semibold py-6 text-base sm:text-lg"
-            >
-              <Camera className="w-5 h-5 mr-2" />
-              Iniciar Câmera
-            </Button>
+            <>
+              <Button
+                onClick={iniciarCamera}
+                className="flex-1 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-semibold py-6 text-base sm:text-lg"
+              >
+                <Camera className="w-5 h-5 mr-2" />
+                Usar Câmera
+              </Button>
+              <Button
+                onClick={abrirSeletorArquivo}
+                variant="outline"
+                className="flex-1 border-slate-600 text-slate-300 hover:bg-slate-700 py-6 text-base sm:text-lg"
+              >
+                <Upload className="w-5 h-5 mr-2" />
+                Fazer Upload
+              </Button>
+            </>
           )}
 
           {cameraAtiva && (
